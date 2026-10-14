@@ -18,7 +18,7 @@ export const devWalletFilter: Filter = {
     const balance = BigInt(Math.round(r.value.creatorBalance ?? 0));
     const holding = supply.value > 0n ? Number((balance * 1_000_000n) / supply.value) / 1_000_000 : 0;
 
-    const data: Record<string, unknown> = { creator, holdingFraction: holding };
+    const data: Record<string, unknown> = { source: 'rugcheck', creator, holdingFraction: holding };
     if (holding > cfg.maxDevHoldingFraction) {
       return fail(`creator holds ${pct(holding)} (> ${pct(cfg.maxDevHoldingFraction)})`, data);
     }
@@ -36,6 +36,7 @@ export const devWalletFilter: Filter = {
     if (launchBought && launchBought > 0n) {
       const sold = balance >= launchBought ? 0 : 1 - Number((balance * 1_000_000n) / launchBought) / 1_000_000;
       data.soldFraction = sold;
+      data.source = 'rugcheck+onchain';
       if (sold > cfg.maxDevSoldFraction) return fail(`creator sold ${pct(sold)} of launch buy (> ${pct(cfg.maxDevSoldFraction)})`, data);
     } else {
       data.soldFraction = 'unknown';

@@ -12,17 +12,19 @@ export const tokenAgeFilter: Filter = {
     const minMs = ctx.config.filters.tokenAge.minAgeMinutes * 60_000;
     const now = ctx.now();
     const times: number[] = [];
+    let source = 'dexscreener';
     if (ctx.candidate.earliestPairCreatedAt) times.push(ctx.candidate.earliestPairCreatedAt);
     if (!times.length || now - Math.min(...times) < minMs) {
       const r = await ctx.rugcheck();
       if (r.ok && r.value.detectedAt) {
         const t = Date.parse(r.value.detectedAt);
+        if (!Number.isNaN(t) && (!times.length || t < Math.min(...times))) source = 'rugcheck';
         if (!Number.isNaN(t)) times.push(t);
       }
     }
     if (!times.length) return missing('no creation timestamp from DexScreener or RugCheck');
     const ageMin = (now - Math.min(...times)) / 60_000;
-    const data = { ageMinutes: Math.round(ageMin) };
+    const data = { source, ageMinutes: Math.round(ageMin) };
     if (ageMin * 60_000 < minMs) {
       return fail(`age ${Math.round(ageMin)}m < ${ctx.config.filters.tokenAge.minAgeMinutes}m`, data);
     }

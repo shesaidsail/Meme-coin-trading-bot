@@ -19,6 +19,7 @@ export const honeypotFilter: Filter = {
 
     const roundTripLoss = 1 - ratio(sell.quote.outAmount, sizeLamports);
     const data = {
+      source: 'jupiter',
       sizeLamports: sizeLamports.toString(),
       buyImpact: buy.quote.priceImpact,
       sellImpact: sell.quote.priceImpact,

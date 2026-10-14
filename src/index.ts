@@ -7,7 +7,9 @@ import { solToLamports, formatSol, mulFrac } from './util/units.js';
 import { createLogger } from './util/logger.js';
 import pino from 'pino';
 import { createClients } from './clients/index.js';
-import { Scanner } from './scanner/scanner.js';
+import { Scanner, buildCandidate } from './scanner/scanner.js';
+import type { Candidate } from './scanner/types.js';
+import { randomUUID } from 'node:crypto';
 import { evaluateCandidates } from './engine/evaluate.js';
 import { ALL_FILTERS } from './filters/index.js';
 import { apiUsageReport, evaluationsReport, filterOutcomeReport, rugcheckScoreDistribution } from './cli/reports.js';
@@ -98,6 +100,41 @@ program
       if (budgetExhausted) console.log(`\nStopped early: ${budgetExhausted}`);
       console.log('\nRugCheck normalised risk score (0 = safest, 100 = riskiest) in this batch:');
       console.log(await rugcheckScoreDistribution(evaluations));
+    } finally {
+      storage.close();
+    }
+  });
+
+program
+  .command('evaluate <mints...>')
+  .description('run the filter pipeline on specific mints and show every decision with its data source')
+  .option('--first-reject', 'stop at the first rejecting filter (default: run all)')
+  .action(async (mints: string[], opts: { firstReject?: boolean }) => {
+    const { config, logger, storage, clients } = boot();
+    try {
+      const pairs = await clients.dexscreener.pairsForTokens(mints);
+      const candidates: Candidate[] = [];
+      for (const m of mints) {
+        const c = buildCandidate(m, pairs.filter((p) => p.baseToken.address === m), config, ['manual']);
+        if (typeof c === 'string') console.log(`${m}: not evaluated (${c})`);
+        else candidates.push(c);
+      }
+      const size = mulFrac(storage.ledger.balance(), config.strategy.positionSizeFraction);
+      const { evaluations } = await evaluateCandidates(
+        candidates,
+        `manual-${randomUUID()}`,
+        size,
+        { config, clients, storage, clock: systemClock, logger, filters: ALL_FILTERS },
+        { stopOnFirstReject: !!opts.firstReject },
+      );
+      for (const e of evaluations) {
+        console.log(`\n${e.candidate.symbol ?? '?'} ${e.candidate.mint}  mcap $${Math.round(e.candidate.marketCapUsd).toLocaleString('en-US')}  → ${e.result.verdict}`);
+        for (const r of e.result.results) {
+          const d = (r.data ?? {}) as Record<string, unknown>;
+          const src = typeof d.source === 'string' ? d.source : '';
+          console.log(`  ${r.filter.padEnd(20)} ${r.outcome.padEnd(18)} ${src.padEnd(9)} ${r.reason ?? ''}${typeof d.onchain === 'string' ? `  [on-chain: ${d.onchain}]` : ''}`);
+        }
+      }
     } finally {
       storage.close();
     }

@@ -35,6 +35,7 @@ export const bundledLaunchFilter: Filter = {
         linkedNetworkWallets: largest?.size ?? 0,
         networks: networks.length,
       });
+      data.source = 'rugcheck';
       evaluated++;
       if (held > cfg.maxInsiderHeldFraction) {
         return fail(`insider-flagged holders hold ${pct(held)} (> ${pct(cfg.maxInsiderHeldFraction)}, RugCheck)`, data);
@@ -59,6 +60,7 @@ export const bundledLaunchFilter: Filter = {
         launchTxs: a.txCount,
         truncated: a.truncated,
       });
+      data.source = data.source ? 'rugcheck+onchain' : 'onchain';
       evaluated++;
       if (a.launchBuyFraction > cfg.maxLaunchBuyFraction) {
         return fail(

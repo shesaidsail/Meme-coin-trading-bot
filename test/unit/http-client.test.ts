@@ -151,6 +151,14 @@ describe('SolanaRpcClient', () => {
     await expect(rpc.getTokenLargestAccounts('Mint')).rejects.toBeInstanceOf(ApiError); // still the first route (429)
   });
 
+  it('requests transactions up to version 1 (mainnet carries v1 transactions)', async () => {
+    const { http, fake, clock } = client();
+    const rpc = new SolanaRpcClient(http, () => clock.now());
+    fake.on(/getTransaction/, rpcOk(null));
+    await rpc.getTransaction('sig');
+    expect((fake.calls[0]!.body as { params: [string, { maxSupportedTransactionVersion: number }] }).params[1].maxSupportedTransactionVersion).toBe(1);
+  });
+
   it('surfaces other RPC errors', async () => {
     const { http, fake, clock } = client();
     const rpc = new SolanaRpcClient(http, () => clock.now());

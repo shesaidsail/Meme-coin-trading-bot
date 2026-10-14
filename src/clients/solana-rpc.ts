@@ -12,6 +12,13 @@ export const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
  */
 const UNITS = { read: 1, history: 10 } as const;
 
+/**
+ * Highest transaction version we can parse. Mainnet carries version-1
+ * transactions; requesting with 0 makes the RPC reject them (-32015).
+ * Versions 0 and 1 share the jsonParsed shape used here (verified live).
+ */
+export const MAX_TX_VERSION = 1;
+
 const RpcEnvelope = z.looseObject({
   result: z.unknown().optional(),
   error: z.looseObject({ code: z.number(), message: z.string() }).nullish(),
@@ -248,7 +255,7 @@ export class SolanaRpcClient {
   async getTransaction(signature: string): Promise<ParsedTx | null> {
     const tx = await this.call(
       'getTransaction',
-      [signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }],
+      [signature, { encoding: 'jsonParsed', maxSupportedTransactionVersion: MAX_TX_VERSION, commitment: 'confirmed' }],
       TxSchema,
       { units: UNITS.history },
     );
