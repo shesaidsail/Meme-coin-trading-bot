@@ -8,6 +8,8 @@ mode: paper
 
 paper:
   startingSol: 10
+  latencyMs: 1500 # decision quote -> execution quote (fill price)
+  adverseFillBps: 50 # extra adverse execution vs. the execution quote
 
 chain:
   solMint: So11111111111111111111111111111111111111112
@@ -43,6 +45,8 @@ execution:
     maxSlippageBps: 2000 # cap
     maxAttempts: 6
     retryDelayMs: 2000
+    minChunkFraction: 0.125 # a no-route failure halves the next sell (partial fills), down to this
+    dustFraction: 0.001 # remainder at or below this share of the position is written off
 
 loop:
   scanIntervalSec: 60

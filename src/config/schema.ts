@@ -199,6 +199,13 @@ export const ConfigSchema = z
     paper: z
       .object({
         startingSol: z.number().positive().default(10),
+        /**
+         * Simulated time between deciding to trade (first quote, which sets the
+         * minimum acceptable output) and execution (second quote = fill price).
+         */
+        latencyMs: nonNegInt.default(1_500),
+        /** Extra adverse execution vs. the execution quote (sandwiching, landing delay). */
+        adverseFillBps: nonNegInt.default(50),
       })
       .prefault({}),
 
@@ -264,6 +271,13 @@ export const ConfigSchema = z
             maxSlippageBps: positiveInt.default(2_000),
             maxAttempts: positiveInt.default(6),
             retryDelayMs: nonNegInt.default(2_000),
+            /**
+             * After a no-route failure the next attempt sells half as much
+             * (a partial fill), down to this fraction of the position.
+             */
+            minChunkFraction: fraction.default(0.125),
+            /** A remainder at or below this fraction of the initial amount is written off and the position closed. */
+            dustFraction: fraction.default(0.001),
           })
           .prefault({}),
       })

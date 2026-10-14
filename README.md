@@ -12,8 +12,9 @@ It runs in **paper mode by default**: paper fills are simulated against real Jup
 |---|---|---|
 | 1 | Scaffolding, config, SQLite storage, logging | ✅ done |
 | 2 | API clients (rate limits + daily budgets), scanner, rug filters | ✅ done |
-| 3 | Risk math (equity, sizing, caps, exit multiplier), paper executor | ⏳ next |
-| 4 | Monitor, engine loop, kill switch, CLI summary (paper mode end to end) | — |
+| 2b | Real-time pool-creation discovery (Helius WebSocket), per-source yield | ✅ done |
+| 3 | Risk math (equity, sizing, caps, exit multiplier), paper executor | ✅ done |
+| 4 | Monitor, engine loop, kill switch, CLI summary (paper mode end to end) | ⏳ next |
 | 5 | Live executor (only after paper mode is verified) | — |
 
 ## Requirements
@@ -96,6 +97,22 @@ The filters run cheapest-first, so most tokens are rejected before the expensive
   - `skip`: the filter is ignored for that token.
   - `warn`: the token passes, and the gap is logged.
 - **API limits:** each provider has a rate limit and a daily budget. Usage is stored in SQLite, so restarts don't reset it. Part of each budget (`reserveFraction`) is held back for exit quotes and sells, so scanning pauses before the bot loses the ability to exit.
+
+## Risk and execution
+
+- **Equity** = cash + every open position valued at what a full-size Jupiter sell quote would net after sell costs. This is not the mark price. A position that can't be quoted counts as 0. After `unquotableAfterFailures` consecutive failed quotes it is flagged `unquotable`.
+- **Entry size** = `positionSizeFraction` (5%) of current equity. This is the total SOL committed: swap amount + priority fee + token-account rent.
+- **Exposure caps:** at most `maxOpenPositions` (10) open positions, and deployed capital + the new entry ≤ `maxDeployedFraction` (50%) of equity. If either cap would be exceeded the entry is skipped, never downsized. Deployed capital uses sellable value, or cost basis for positions that can't be quoted.
+- **Take-profit:** fires when a live sell quote for the whole position, net of the remaining sell costs, reaches `targetNetMultiplier` (2.5) × cost basis, i.e. +150% net of all costs. Each position also records its costs at entry and the gross price multiple from `gross = 2.5 / ((1 − buy_cost) × (1 − sell_cost))`. Buy cost is measured from the actual fill; sell cost is estimated from a sell quote for the amount bought.
+- **Paper fills** use real Jupiter quotes:
+  - a decision quote sets the minimum acceptable output;
+  - after `paper.latencyMs`, a second quote sets the fill, minus `paper.adverseFillBps`;
+  - a fill below the minimum is a slippage failure and still pays the fee.
+- **Sells** retry up to `maxAttempts` times and record every attempt:
+  - a slippage failure raises slippage by `slippageStepBps`, up to `maxSlippageBps`;
+  - a no-route failure halves the next chunk, so the position sells off in partial fills;
+  - a remainder at or below `dustFraction` is written off and the position closed.
+- **Live executor:** refuses to start until step 5.
 
 ## Storage
 
