@@ -157,6 +157,35 @@ export const MIGRATIONS: { version: number; name: string; sql: string }[] = [
       CREATE INDEX ix_equity_ts ON equity_snapshots(ts);
     `,
   },
+  {
+    version: 2,
+    name: 'scanner_watchlist_and_rate_observations',
+    sql: `
+      -- Mints discovered by any source. Young tokens wait here until they are
+      -- old enough to evaluate; evaluated tokens are rechecked after a cooldown.
+      CREATE TABLE watchlist (
+        mint             TEXT    PRIMARY KEY,
+        source           TEXT    NOT NULL,
+        first_seen_at    INTEGER NOT NULL,
+        last_seen_at     INTEGER NOT NULL,
+        last_checked_at  INTEGER,
+        checks           INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX ix_watchlist_due ON watchlist(last_checked_at, first_seen_at);
+
+      -- Rate-limit related response headers as actually returned by each
+      -- provider, sampled, plus every 429. Used to tune budgets from real data.
+      CREATE TABLE api_rate_observations (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts        INTEGER NOT NULL,
+        provider  TEXT    NOT NULL,
+        endpoint  TEXT    NOT NULL,
+        status    INTEGER NOT NULL,
+        headers   TEXT    NOT NULL
+      );
+      CREATE INDEX ix_rate_obs_provider ON api_rate_observations(provider, ts);
+    `,
+  },
 ];
 
 export function migrate(db: Database.Database, now: number): number[] {

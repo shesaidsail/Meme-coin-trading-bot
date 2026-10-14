@@ -49,6 +49,25 @@ loop:
   monitorIntervalSec: 30
   maxCandidatesPerScan: 20
 
+scanner:
+  sources: # birdeye is only used when BIRDEYE_API_KEY is set
+    dexscreenerProfiles: true
+    dexscreenerBoosts: true
+    dexscreenerTakeovers: true
+    dexscreenerAds: true
+    rugcheckNewTokens: true
+    rugcheckRecent: true
+    rugcheckTrending: true
+    birdeye: true
+  excludeDexIds: [pumpfun] # pre-migration bonding curve: no LP, no liquidity figure
+  recheckCooldownMinutes: 10 # watchlisted mints are re-priced at most this often
+  watchExpiryHours: 72
+  maxPricedPerScan: 150 # DexScreener prices 30 mints per call
+  reevaluateCooldownMinutes: 60 # don't re-run the filter pipeline on the same mint sooner
+
+pipeline:
+  stopOnFirstReject: true # false = run every filter on every candidate (fuller stats, more API use)
+
 # Every filter: enabled (bool) and onMissingData: reject | skip | warn
 #   reject - token fails, counted as "insufficient_data" (separate from real failures)
 #   skip   - filter ignored for that token, counted as "skipped"
@@ -74,9 +93,11 @@ filters:
     onMissingData: reject
     maxTop10Fraction: 0.3 # excluding LP and burn addresses
     maxSingleWalletFraction: 0.05
-    excludeAddresses:
-      - 1nc1nerator11111111111111111111111111111111
-      - "11111111111111111111111111111111"
+    excludeAddresses: # pool accounts found via DexScreener/RugCheck are excluded automatically
+      - 1nc1nerator11111111111111111111111111111111 # incinerator
+      - "11111111111111111111111111111111" # null
+      - 5Q544fKrFoe6tsEbD7S8EWxGZXHw4EjVbG6gdT6HmS3 # Raydium AMM v4 authority
+      - GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL # Raydium CPMM authority
   devWallet:
     enabled: true
     onMissingData: reject
@@ -87,18 +108,22 @@ filters:
     enabled: true
     onMissingData: reject
     maxSellPriceImpact: 0.1 # for a sell sized like our position
-    maxRoundTripLoss: 0.15 # buy->sell loss beyond expected costs (hidden taxes)
+    maxRoundTripLoss: 0.15 # quoted buy->sell loss incl. fees + impact (catches sell taxes)
   token2022:
     enabled: true
     onMissingData: reject
-    allowedExtensions: # any other Token-2022 extension rejects the token
-      - MetadataPointer
-      - TokenMetadata
+    allowedExtensions: # RPC jsonParsed names; anything else rejects (transferFeeConfig even at 0%)
+      - metadataPointer
+      - tokenMetadata
   bundledLaunch:
     enabled: true
     onMissingData: reject
     launchSlots: 2
-    maxLaunchBuyFraction: 0.2
+    maxLaunchBuyFraction: 0.2 # on-chain: supply bought in launch slots by non-pool wallets
+    maxInsiderHeldFraction: 0.15 # held now by top holders RugCheck flags as insiders
+    maxLinkedNetworkFraction: 0.5 # supply moved through RugCheck's largest linked-wallet network (calibrate)
+    maxSignaturePages: 3 # history pages walked to find the launch; busy tokens fall back to RugCheck
+    maxLaunchTransactions: 40
   tokenAge:
     enabled: true
     onMissingData: reject
@@ -130,11 +155,11 @@ apis:
     maxRetries: 3
     rateLimit: { maxPerSecond: 2, maxPerMinute: 50 }
     budget: { unitsPerDay: 40000, reserveFraction: 0.25 }
-  rugcheck:
+  rugcheck: # observed header: x-rate-limit-limit: 15 (window ~1s)
     baseUrl: https://api.rugcheck.xyz/v1
     timeoutMs: 10000
     maxRetries: 3
-    rateLimit: { maxPerSecond: 1, maxPerMinute: 20 }
+    rateLimit: { maxPerSecond: 2, maxPerMinute: 30 }
     budget: { unitsPerDay: 5000, reserveFraction: 0.25 }
   rpc: # actual URL comes from SOLANA_RPC_URL in .env; baseUrl is the keyless fallback
     baseUrl: https://api.mainnet-beta.solana.com
@@ -156,3 +181,4 @@ killSwitchFile: data/KILL # if this file exists, no new entries are opened
 
 logging:
   level: info
+  rateHeaderSampleSec: 60 # store each provider's rate-limit headers at most this often (429s always)

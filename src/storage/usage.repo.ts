@@ -55,3 +55,55 @@ export class UsageRepo {
       .all(utcDay(at)) as ApiUsage[];
   }
 }
+
+export interface RateObservation {
+  ts: number;
+  provider: string;
+  endpoint: string;
+  status: number;
+  headers: Record<string, string>;
+}
+
+export class RateObservationsRepo {
+  constructor(private readonly db: Database.Database) {}
+
+  insert(o: RateObservation): void {
+    this.db
+      .prepare(
+        'INSERT INTO api_rate_observations (ts, provider, endpoint, status, headers) VALUES (?, ?, ?, ?, ?)',
+      )
+      .run(o.ts, o.provider, o.endpoint, o.status, JSON.stringify(o.headers));
+  }
+
+  latest(provider: string, limit = 1): RateObservation[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM api_rate_observations WHERE provider = ? ORDER BY id DESC LIMIT ?')
+        .all(provider, limit) as {
+        ts: number;
+        provider: string;
+        endpoint: string;
+        status: number;
+        headers: string;
+      }[]
+    ).map((r) => ({ ...r, headers: JSON.parse(r.headers) as Record<string, string> }));
+  }
+
+  count429(provider: string, sinceTs: number): number {
+    return (
+      this.db
+        .prepare(
+          'SELECT COUNT(*) AS n FROM api_rate_observations WHERE provider = ? AND status = 429 AND ts >= ?',
+        )
+        .get(provider, sinceTs) as { n: number }
+    ).n;
+  }
+
+  providers(): string[] {
+    return (
+      this.db.prepare('SELECT DISTINCT provider FROM api_rate_observations ORDER BY provider').all() as {
+        provider: string;
+      }[]
+    ).map((r) => r.provider);
+  }
+}

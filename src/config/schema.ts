@@ -28,8 +28,10 @@ const filterBase = {
 
 /** Well-known burn / null addresses excluded from holder concentration. */
 export const DEFAULT_EXCLUDED_HOLDERS = [
-  '1nc1nerator11111111111111111111111111111111',
-  '11111111111111111111111111111111',
+  '1nc1nerator11111111111111111111111111111111', // incinerator
+  '11111111111111111111111111111111', // system program / null
+  '5Q544fKrFoe6tsEbD7S8EWxGZXHw4EjVbG6gdT6HmS3', // Raydium AMM v4 authority (pool vaults)
+  'GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL', // Raydium CPMM authority (pool vaults)
 ];
 
 const FiltersSchema = z.object({
@@ -57,7 +59,10 @@ const FiltersSchema = z.object({
       maxTop10Fraction: fraction.default(0.3),
       /** Largest single non-LP wallet, as fraction of supply. */
       maxSingleWalletFraction: fraction.default(0.05),
-      /** Extra addresses (beyond detected LP/burn) to exclude, e.g. lockers. */
+      /**
+       * Owners excluded from concentration (burn addresses, AMM vault authorities).
+       * Pool accounts detected from DexScreener/RugCheck are excluded automatically.
+       */
       excludeAddresses: z.array(z.string()).default(DEFAULT_EXCLUDED_HOLDERS),
     })
     .prefault({}),
@@ -76,8 +81,9 @@ const FiltersSchema = z.object({
       /** Max price impact of a sell quote sized like our intended position. */
       maxSellPriceImpact: fraction.default(0.1),
       /**
-       * Max loss on a simulated buy→sell round trip, beyond expected costs.
-       * Catches hidden sell taxes that a price-impact check alone misses.
+       * Max loss on a quoted buy→sell round trip sized like our position
+       * (includes pool fees and price impact on both sides). Catches sell
+       * taxes and asymmetric pools that a one-sided impact check misses.
        */
       maxRoundTripLoss: fraction.default(0.15),
     })
@@ -86,11 +92,13 @@ const FiltersSchema = z.object({
     .object({
       ...filterBase,
       /**
-       * Token-2022 extensions considered harmless. Any other extension
-       * (TransferFee, TransferHook, PermanentDelegate, NonTransferable,
-       * DefaultAccountState, ConfidentialTransfer, ...) rejects the token.
+       * Token-2022 extensions considered harmless, by their RPC jsonParsed
+       * names. Any other extension (transferFeeConfig, transferHook,
+       * permanentDelegate, nonTransferable, defaultAccountState, pausableConfig,
+       * confidentialTransferMint, ...) rejects the token. Note that
+       * transferFeeConfig is rejected even at 0% because its authority can raise it.
        */
-      allowedExtensions: z.array(z.string()).default(['MetadataPointer', 'TokenMetadata']),
+      allowedExtensions: z.array(z.string()).default(['metadataPointer', 'tokenMetadata']),
     })
     .prefault({}),
   bundledLaunch: z
@@ -98,8 +106,26 @@ const FiltersSchema = z.object({
       ...filterBase,
       /** Number of slots from pool creation treated as "launch". */
       launchSlots: positiveInt.default(2),
-      /** Max fraction of supply bought in launch slots by linked/sniper wallets. */
+      /** Max fraction of supply bought in the launch slots by non-pool wallets (on-chain check). */
       maxLaunchBuyFraction: fraction.default(0.2),
+      /** Max fraction of supply currently held by top holders RugCheck flags as insiders. */
+      maxInsiderHeldFraction: fraction.default(0.15),
+      /**
+       * Max token amount of RugCheck's largest linked-wallet network, as a
+       * fraction of supply. RugCheck reports this as tokenAmount/currentHolding
+       * but live data shows values far above what the top holders could hold
+       * (e.g. 98.9% for a 32-wallet network), so it is treated as "supply that
+       * moved through linked wallets", a bundling signal. Calibrate from paper data.
+       */
+      maxLinkedNetworkFraction: fraction.default(0.5),
+      /**
+       * Pages (1000 signatures each) to walk back through the mint's history
+       * looking for its launch. Busy tokens exceed this and fall back to
+       * RugCheck insider data only. Each page and each launch tx costs RPC budget.
+       */
+      maxSignaturePages: positiveInt.default(3),
+      /** Max launch-slot transactions fetched for the on-chain check. */
+      maxLaunchTransactions: positiveInt.default(40),
     })
     .prefault({}),
   tokenAge: z
@@ -251,6 +277,48 @@ export const ConfigSchema = z
       })
       .prefault({}),
 
+    scanner: z
+      .object({
+        /** Discovery sources. Birdeye is used only when BIRDEYE_API_KEY is set. */
+        sources: z
+          .object({
+            dexscreenerProfiles: z.boolean().default(true),
+            dexscreenerBoosts: z.boolean().default(true),
+            dexscreenerTakeovers: z.boolean().default(true),
+            dexscreenerAds: z.boolean().default(true),
+            rugcheckNewTokens: z.boolean().default(true),
+            rugcheckRecent: z.boolean().default(true),
+            rugcheckTrending: z.boolean().default(true),
+            birdeye: z.boolean().default(true),
+          })
+          .prefault({}),
+        /**
+         * DexScreener dexIds that are skipped. "pumpfun" is the pre-migration
+         * bonding curve: there is no LP to verify and no liquidity figure.
+         */
+        excludeDexIds: z.array(z.string()).default(['pumpfun']),
+        /** Watchlisted mints are re-priced at most this often. */
+        recheckCooldownMinutes: z.number().positive().default(10),
+        /** Watchlisted mints are dropped this long after first being seen. */
+        watchExpiryHours: z.number().positive().default(72),
+        /** Max watchlist mints re-priced per scan (DexScreener takes 30 per call). */
+        maxPricedPerScan: positiveInt.default(150),
+        /** A mint that went through the filter pipeline is not re-evaluated for this long. */
+        reevaluateCooldownMinutes: z.number().nonnegative().default(60),
+      })
+      .prefault({}),
+
+    pipeline: z
+      .object({
+        /**
+         * Stop at the first rejecting filter (saves API budget; later filters
+         * get no result for that token). false = run all filters on every
+         * candidate for fuller statistics.
+         */
+        stopOnFirstReject: z.boolean().default(true),
+      })
+      .prefault({}),
+
     filters: FiltersSchema.prefault({}),
 
     apis: z
@@ -269,8 +337,8 @@ export const ConfigSchema = z
         }),
         rugcheck: ApiSchema({
           baseUrl: 'https://api.rugcheck.xyz/v1',
-          maxPerSecond: 1,
-          maxPerMinute: 20,
+          maxPerSecond: 2,
+          maxPerMinute: 30,
           budgetUnitsPerDay: 5_000,
         }),
         /** RPC URL itself comes from SOLANA_RPC_URL in .env (it embeds the API key). */
@@ -301,6 +369,11 @@ export const ConfigSchema = z
     logging: z
       .object({
         level: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
+        /**
+         * Rate-limit response headers are stored per provider at most this
+         * often (every 429 is always stored). See `bot api-usage`.
+         */
+        rateHeaderSampleSec: positiveInt.default(60),
       })
       .prefault({}),
   })

@@ -6,7 +6,8 @@ import { PositionsRepo } from './positions.repo.js';
 import { TradesRepo } from './trades.repo.js';
 import { LedgerRepo } from './ledger.repo.js';
 import { AuditRepo } from './audit.repo.js';
-import { UsageRepo } from './usage.repo.js';
+import { UsageRepo, RateObservationsRepo } from './usage.repo.js';
+import { WatchlistRepo } from './watchlist.repo.js';
 import { SnapshotsRepo } from './snapshots.repo.js';
 import type { ExitReason, Mode, NewPosition, NewTrade, Position } from './types.js';
 import type { Clock } from '../util/clock.js';
@@ -43,6 +44,8 @@ export class Storage {
   readonly audit: AuditRepo;
   readonly usage: UsageRepo;
   readonly snapshots: SnapshotsRepo;
+  readonly watchlist: WatchlistRepo;
+  readonly rateObservations: RateObservationsRepo;
 
   private constructor(
     readonly db: Database.Database,
@@ -55,6 +58,8 @@ export class Storage {
     this.audit = new AuditRepo(db);
     this.usage = new UsageRepo(db);
     this.snapshots = new SnapshotsRepo(db);
+    this.watchlist = new WatchlistRepo(db);
+    this.rateObservations = new RateObservationsRepo(db);
   }
 
   static open(opts: OpenStorageOptions): Storage {
