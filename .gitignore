@@ -1,0 +1,23 @@
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.key
+*keypair*.json
+id.json
+
+# Runtime state
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+KILL
+logs/
+*.log
+
+# Build / deps
+node_modules/
+dist/
+coverage/
+.DS_Store

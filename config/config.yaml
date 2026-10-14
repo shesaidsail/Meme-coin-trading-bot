@@ -1,0 +1,158 @@
+# Bot configuration. Secrets (RPC URL with key, API keys, wallet key) go in .env, never here.
+# Every value below is the built-in default; a test keeps this file and the schema in sync.
+# Fractions are 0..1 (0.05 = 5%). bps = basis points (100 bps = 1%).
+
+# "paper" simulates fills against real Jupiter quotes. "live" sends real transactions
+# and requires WALLET_PRIVATE_KEY in .env. Use a separate storage.path per mode.
+mode: paper
+
+paper:
+  startingSol: 10
+
+chain:
+  solMint: So11111111111111111111111111111111111111112
+  usdcMint: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+
+universe:
+  minMarketCapUsd: 150000
+  maxMarketCapUsd: 600000
+  targetMarketCapUsd: 300000 # candidates closest to this are evaluated first
+
+strategy:
+  positionSizeFraction: 0.05 # of current equity, positions valued at sellable (quote) value
+  maxOpenPositions: 10
+  maxDeployedFraction: 0.5 # deployed capital never exceeds this share of equity
+  targetNetMultiplier: 2.5 # net +150% after all costs
+  timeStopHours: 48
+  stopLoss:
+    enabled: false # when false it is still evaluated and logged ("shadow" stop-loss)
+    lossFraction: 0.5 # sellable value 50% below cost basis
+  unquotableAfterFailures: 3 # consecutive failed sell quotes before flagging "unquotable"
+
+costs:
+  swapFeeBps: 0 # platform/referral fee on top of the route
+  priorityFeeLamports: 100000 # priority + base fee per swap tx
+  expectedSlippageBps: 100 # per side, beyond quoted price impact
+  ataRentLamports: 2039280 # token account rent on buy, refunded on full exit
+
+execution:
+  buySlippageBps: 300
+  sell:
+    initialSlippageBps: 300
+    slippageStepBps: 300 # added after each failed/partial attempt
+    maxSlippageBps: 2000 # cap
+    maxAttempts: 6
+    retryDelayMs: 2000
+
+loop:
+  scanIntervalSec: 60
+  monitorIntervalSec: 30
+  maxCandidatesPerScan: 20
+
+# Every filter: enabled (bool) and onMissingData: reject | skip | warn
+#   reject - token fails, counted as "insufficient_data" (separate from real failures)
+#   skip   - filter ignored for that token, counted as "skipped"
+#   warn   - filter passes, counted as "warn"
+filters:
+  mintAuthority:
+    enabled: true
+    onMissingData: reject
+  freezeAuthority:
+    enabled: true
+    onMissingData: reject
+  lpLocked:
+    enabled: true
+    onMissingData: reject
+    minBurnedOrLockedFraction: 0.95
+  liquidity:
+    enabled: true
+    onMissingData: reject
+    minLiquidityUsd: 40000
+    minLiquidityToMcap: 0.1
+  holderConcentration:
+    enabled: true
+    onMissingData: reject
+    maxTop10Fraction: 0.3 # excluding LP and burn addresses
+    maxSingleWalletFraction: 0.05
+    excludeAddresses:
+      - 1nc1nerator11111111111111111111111111111111
+      - "11111111111111111111111111111111"
+  devWallet:
+    enabled: true
+    onMissingData: reject
+    maxDevHoldingFraction: 0.05
+    maxDevSoldFraction: 0.5
+    rejectPriorRugs: true
+  honeypot:
+    enabled: true
+    onMissingData: reject
+    maxSellPriceImpact: 0.1 # for a sell sized like our position
+    maxRoundTripLoss: 0.15 # buy->sell loss beyond expected costs (hidden taxes)
+  token2022:
+    enabled: true
+    onMissingData: reject
+    allowedExtensions: # any other Token-2022 extension rejects the token
+      - MetadataPointer
+      - TokenMetadata
+  bundledLaunch:
+    enabled: true
+    onMissingData: reject
+    launchSlots: 2
+    maxLaunchBuyFraction: 0.2
+  tokenAge:
+    enabled: true
+    onMissingData: reject
+    minAgeMinutes: 30
+  holderCount:
+    enabled: true
+    onMissingData: reject
+    minHolders: 200
+  rugcheckScore:
+    enabled: true
+    onMissingData: reject
+    maxNormalisedRiskScore: 30 # RugCheck normalised score is a RISK score: 0 safest, 100 riskiest
+    rejectOnDangerRisks: true
+
+# Rate limits and daily budgets per provider. Budgets are persisted in SQLite and reset
+# at 00:00 UTC. reserveFraction of each budget is kept for exit quotes and sells, so the
+# bot can always get out of positions; scanning pauses once only the reserve remains.
+# Defaults are conservative guesses for free tiers. Check them against your plans.
+apis:
+  jupiter:
+    baseUrl: https://lite-api.jup.ag/swap/v1
+    timeoutMs: 10000
+    maxRetries: 3
+    rateLimit: { maxPerSecond: 1, maxPerMinute: 50 }
+    budget: { unitsPerDay: 50000, reserveFraction: 0.25 }
+  dexscreener:
+    baseUrl: https://api.dexscreener.com
+    timeoutMs: 10000
+    maxRetries: 3
+    rateLimit: { maxPerSecond: 2, maxPerMinute: 50 }
+    budget: { unitsPerDay: 40000, reserveFraction: 0.25 }
+  rugcheck:
+    baseUrl: https://api.rugcheck.xyz/v1
+    timeoutMs: 10000
+    maxRetries: 3
+    rateLimit: { maxPerSecond: 1, maxPerMinute: 20 }
+    budget: { unitsPerDay: 5000, reserveFraction: 0.25 }
+  rpc: # actual URL comes from SOLANA_RPC_URL in .env; baseUrl is the keyless fallback
+    baseUrl: https://api.mainnet-beta.solana.com
+    timeoutMs: 10000
+    maxRetries: 3
+    rateLimit: { maxPerSecond: 8, maxPerMinute: 300 }
+    budget: { unitsPerDay: 30000, reserveFraction: 0.25 }
+  birdeye: # used only when BIRDEYE_API_KEY is set
+    baseUrl: https://public-api.birdeye.so
+    timeoutMs: 10000
+    maxRetries: 3
+    rateLimit: { maxPerSecond: 1, maxPerMinute: 30 }
+    budget: { unitsPerDay: 1000, reserveFraction: 0.25 }
+
+storage:
+  path: data/bot.db
+
+killSwitchFile: data/KILL # if this file exists, no new entries are opened
+
+logging:
+  level: info
