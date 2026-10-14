@@ -14,10 +14,10 @@ const bal = (owner: string, amount: bigint) => ({ owner, mint: ABU_MINT, amount 
  */
 export function launchTxs(creator: string): { signatures: SignatureInfo[][]; txs: Record<string, ParsedTx> } {
   const txs: Record<string, ParsedTx> = {
-    create: { slot: 100, blockTime: 1, failed: false, feePayer: creator, preTokenBalances: [], postTokenBalances: [bal('Curve', part(0.96)), bal(creator, part(0.04))] },
-    snipe1: { slot: 101, blockTime: 1, failed: false, feePayer: 'S1', preTokenBalances: [bal('Curve', part(0.96))], postTokenBalances: [bal('Curve', part(0.86)), bal('S1', part(0.1))] },
-    snipe2: { slot: 101, blockTime: 1, failed: false, feePayer: 'S2', preTokenBalances: [bal('Curve', part(0.86))], postTokenBalances: [bal('Curve', part(0.78)), bal('S2', part(0.08))] },
-    later: { slot: 150, blockTime: 2, failed: false, feePayer: 'L', preTokenBalances: [bal('Curve', part(0.78))], postTokenBalances: [bal('Curve', part(0.7)), bal('L', part(0.08))] },
+    create: { slot: 100, blockTime: 1, failed: false, logMessages: [], initializedMints: [], feePayer: creator, preTokenBalances: [], postTokenBalances: [bal('Curve', part(0.96)), bal(creator, part(0.04))] },
+    snipe1: { slot: 101, blockTime: 1, failed: false, logMessages: [], initializedMints: [], feePayer: 'S1', preTokenBalances: [bal('Curve', part(0.96))], postTokenBalances: [bal('Curve', part(0.86)), bal('S1', part(0.1))] },
+    snipe2: { slot: 101, blockTime: 1, failed: false, logMessages: [], initializedMints: [], feePayer: 'S2', preTokenBalances: [bal('Curve', part(0.86))], postTokenBalances: [bal('Curve', part(0.78)), bal('S2', part(0.08))] },
+    later: { slot: 150, blockTime: 2, failed: false, logMessages: [], initializedMints: [], feePayer: 'L', preTokenBalances: [bal('Curve', part(0.78))], postTokenBalances: [bal('Curve', part(0.7)), bal('L', part(0.08))] },
   };
   const signatures: SignatureInfo[][] = [
     [

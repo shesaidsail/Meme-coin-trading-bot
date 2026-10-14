@@ -64,6 +64,14 @@ scanner:
   watchExpiryHours: 72
   maxPricedPerScan: 150 # DexScreener prices 30 mints per call
   reevaluateCooldownMinutes: 60 # don't re-run the filter pipeline on the same mint sooner
+  poolListener: # real-time pool creations over the RPC WebSocket (Helius free tier works)
+    enabled: true
+    pumpGraduations: true # pump.fun -> PumpSwap migrations
+    raydiumCpmm: true # Raydium CPMM pools, incl. LaunchLab graduations
+    maxResolvesPerHour: 400 # one getTransaction per creation
+    backfillLimit: 50 # missed signatures fetched per feed after a reconnect
+    idleReconnectMinutes: 10
+    reconnectMaxDelaySec: 60
 
 pipeline:
   stopOnFirstReject: true # false = run every filter on every candidate (fuller stats, more API use)

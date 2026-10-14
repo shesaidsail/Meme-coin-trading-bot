@@ -305,6 +305,27 @@ export const ConfigSchema = z
         maxPricedPerScan: positiveInt.default(150),
         /** A mint that went through the filter pipeline is not re-evaluated for this long. */
         reevaluateCooldownMinutes: z.number().nonnegative().default(60),
+        /**
+         * Real-time pool-creation discovery over the RPC WebSocket (Helius free
+         * tier works). Tokens are priced only once pool creation + the minimum
+         * token age has passed.
+         */
+        poolListener: z
+          .object({
+            enabled: z.boolean().default(true),
+            /** pump.fun graduations to PumpSwap (via the pump.fun migration authority). */
+            pumpGraduations: z.boolean().default(true),
+            /** Raydium CPMM pool creations, including Raydium LaunchLab graduations. */
+            raydiumCpmm: z.boolean().default(true),
+            /** Cap on transactions resolved per hour (one getTransaction each). */
+            maxResolvesPerHour: positiveInt.default(400),
+            /** On (re)connect, catch up on at most this many missed signatures per feed. */
+            backfillLimit: nonNegInt.default(50),
+            /** Reconnect if no message arrives for this long. */
+            idleReconnectMinutes: z.number().positive().default(10),
+            reconnectMaxDelaySec: positiveInt.default(60),
+          })
+          .prefault({}),
       })
       .prefault({}),
 

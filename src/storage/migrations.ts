@@ -186,6 +186,26 @@ export const MIGRATIONS: { version: number; name: string; sql: string }[] = [
       CREATE INDEX ix_rate_obs_provider ON api_rate_observations(provider, ts);
     `,
   },
+  {
+    version: 3,
+    name: 'watchlist_eligibility_and_sources',
+    sql: `
+      -- Not priced before this time (pool-creation discovery: creation + min age).
+      -- NULL = eligible immediately.
+      ALTER TABLE watchlist ADD COLUMN eligible_at INTEGER;
+
+      -- Every source that has reported a mint, for per-source yield stats.
+      CREATE TABLE watchlist_sources (
+        mint           TEXT    NOT NULL,
+        source         TEXT    NOT NULL,
+        first_seen_at  INTEGER NOT NULL,
+        PRIMARY KEY (mint, source)
+      );
+      CREATE INDEX ix_watchlist_sources_source ON watchlist_sources(source, first_seen_at);
+      INSERT INTO watchlist_sources (mint, source, first_seen_at)
+        SELECT mint, source, first_seen_at FROM watchlist;
+    `,
+  },
 ];
 
 export function migrate(db: Database.Database, now: number): number[] {

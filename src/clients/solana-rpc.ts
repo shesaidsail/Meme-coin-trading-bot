@@ -7,10 +7,11 @@ export const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
 export const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 
 /**
- * Budget weights. Plain reads cost 1. History calls are weighted higher
- * because providers (e.g. Helius) bill them as heavier/archival requests.
+ * Budget weights, in provider credits. Helius bills getTransaction and
+ * getSignaturesForAddress at 1 credit like other standard calls
+ * (https://www.helius.dev/docs/billing/credits).
  */
-const UNITS = { read: 1, history: 10 } as const;
+const UNITS = { read: 1, history: 1 } as const;
 
 /**
  * Highest transaction version we can parse. Mainnet carries version-1
@@ -78,12 +79,20 @@ export interface ParsedTx {
   feePayer: string | null;
   preTokenBalances: TokenBalance[];
   postTokenBalances: TokenBalance[];
+  logMessages: string[];
+  /** Mints initialised by this transaction (e.g. a new pool's LP mint). */
+  initializedMints: string[];
 }
 
 const TokenBalanceSchema = z.looseObject({
   mint: z.string(),
   owner: z.string().nullish(),
   uiTokenAmount: z.looseObject({ amount: z.string() }),
+});
+
+/** A jsonParsed instruction; only SPL Token ones carry `parsed`. */
+const ParsedIx = z.looseObject({
+  parsed: z.union([z.looseObject({ type: z.string().optional(), info: z.looseObject({ mint: z.string().optional() }).optional() }), z.unknown()]).optional(),
 });
 
 const TxSchema = z
@@ -95,15 +104,27 @@ const TxSchema = z
         err: z.unknown().optional(),
         preTokenBalances: z.array(TokenBalanceSchema).nullish(),
         postTokenBalances: z.array(TokenBalanceSchema).nullish(),
+        logMessages: z.array(z.string()).nullish(),
+        innerInstructions: z.array(z.looseObject({ instructions: z.array(ParsedIx) })).nullish(),
       })
       .nullish(),
     transaction: z.looseObject({
       message: z.looseObject({
         accountKeys: z.array(z.union([z.string(), z.looseObject({ pubkey: z.string() })])),
+        instructions: z.array(ParsedIx).nullish(),
       }),
     }),
   })
   .nullable();
+
+function initializedMints(ixs: z.infer<typeof ParsedIx>[]): string[] {
+  const out: string[] = [];
+  for (const ix of ixs) {
+    const p = ix.parsed as { type?: string; info?: { mint?: string } } | undefined;
+    if (p && typeof p === 'object' && /^initializeMint2?$/.test(p.type ?? '') && p.info?.mint) out.push(p.info.mint);
+  }
+  return out;
+}
 
 /** How long a method is skipped after it stays rate limited through its retries. */
 export const METHOD_COOLDOWN_MS = 10 * 60_000;
@@ -235,10 +256,13 @@ export class SolanaRpcClient {
     return out;
   }
 
-  async getSignaturesForAddress(address: string, opts: { before?: string; limit?: number } = {}): Promise<SignatureInfo[]> {
+  async getSignaturesForAddress(address: string, opts: { before?: string; until?: string; limit?: number } = {}): Promise<SignatureInfo[]> {
     const res = await this.call(
       'getSignaturesForAddress',
-      [address, { limit: opts.limit ?? 1000, ...(opts.before ? { before: opts.before } : {}), commitment: 'confirmed' }],
+      [
+        address,
+        { limit: opts.limit ?? 1000, ...(opts.before ? { before: opts.before } : {}), ...(opts.until ? { until: opts.until } : {}), commitment: 'confirmed' },
+      ],
       z.array(
         z.looseObject({
           signature: z.string(),
@@ -273,6 +297,10 @@ export class SolanaRpcClient {
       feePayer: k0 === undefined ? null : typeof k0 === 'string' ? k0 : k0.pubkey,
       preTokenBalances: (tx.meta?.preTokenBalances ?? []).map(bal),
       postTokenBalances: (tx.meta?.postTokenBalances ?? []).map(bal),
+      logMessages: tx.meta?.logMessages ?? [],
+      initializedMints: [
+        ...new Set(initializedMints([...(tx.transaction.message.instructions ?? []), ...(tx.meta?.innerInstructions ?? []).flatMap((i) => i.instructions)])),
+      ],
     };
   }
 }

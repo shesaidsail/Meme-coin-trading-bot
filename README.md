@@ -33,6 +33,9 @@ npm run bot -- scan                # one discovery scan + filter pipeline (recor
 npm run bot -- scan --all-filters  # run every filter on every candidate (fuller stats, more API calls)
 npm run bot -- filters             # per-filter outcomes: pass / fail / no data / warn / skipped
 npm run bot -- api-usage           # today's usage vs. budgets + latest rate-limit headers per provider
+npm run bot -- evaluate <mint...>  # full filter pipeline on given tokens, with each decision's data source
+npm run bot -- collect             # pool listener + periodic scans + filtering; never trades (for stats)
+npm run bot -- sources --hours 24  # discovery yield per source (candidates/hour)
 ```
 
 ## Data sources
@@ -46,6 +49,21 @@ Everything works on free tiers: public Solana RPC or free Helius, DexScreener, R
 | Solana RPC | mint/freeze authority, Token-2022 extensions, LP supply, largest holders, launch history | public RPC blocks `getTokenLargestAccounts` (`x-ratelimit-method-limit: 0`); holders then come from RugCheck |
 | Jupiter | honeypot buy→sell quotes; later, execution | `priceImpactPct` is a fraction, not a percent |
 | Birdeye (optional) | discovery by market-cap band | response shape follows docs, unverified without a key |
+
+**Real-time pool creations (RPC WebSocket).** `collect`, and later `run`, subscribe to accounts that appear only in pool-creation transactions:
+- the pump.fun migration authority, for graduations to PumpSwap;
+- Raydium's CPMM pool-creation fee receiver, which also covers Raydium LaunchLab graduations.
+
+Subscribing to the AMM programs themselves would stream every swap (about 500 events a second for PumpSwap), so these narrower subscriptions keep volume low.
+
+Each creation is resolved with one `getTransaction` (1 Helius credit). The new token goes on the watchlist with `eligible_at` = pool creation + `tokenAge.minAgeMinutes`, and it is not priced before then. The listener reconnects with backoff, reconnects when the socket goes quiet, and after each reconnect backfills signatures it missed.
+
+Raydium AMM v4 is not subscribed: it creates almost no new pools any more.
+
+`bot sources` shows, per source:
+- how many mints it reported;
+- how many it reported first;
+- how many became filter candidates, and how many passed, per hour.
 
 The scanner adds every discovered mint to a persistent watchlist. Each scan re-prices due entries and passes the in-band ones, closest to the target market cap first, through the filters. Young tokens wait on the watchlist until they are old enough.
 

@@ -8,11 +8,12 @@ import { createLogger } from './util/logger.js';
 import pino from 'pino';
 import { createClients } from './clients/index.js';
 import { Scanner, buildCandidate } from './scanner/scanner.js';
+import { PoolListener, toWsUrl } from './scanner/pool-listener.js';
 import type { Candidate } from './scanner/types.js';
 import { randomUUID } from 'node:crypto';
 import { evaluateCandidates } from './engine/evaluate.js';
 import { ALL_FILTERS } from './filters/index.js';
-import { apiUsageReport, evaluationsReport, filterOutcomeReport, rugcheckScoreDistribution } from './cli/reports.js';
+import { apiUsageReport, evaluationsReport, filterOutcomeReport, rugcheckScoreDistribution, sourcesReport } from './cli/reports.js';
 
 const program = new Command()
   .name('bot')
@@ -135,6 +136,88 @@ program
           console.log(`  ${r.filter.padEnd(20)} ${r.outcome.padEnd(18)} ${src.padEnd(9)} ${r.reason ?? ''}${typeof d.onchain === 'string' ? `  [on-chain: ${d.onchain}]` : ''}`);
         }
       }
+    } finally {
+      storage.close();
+    }
+  });
+
+program
+  .command('collect')
+  .description('discovery + filtering loop that never trades: pool listener, periodic scans, evaluations (for gathering stats)')
+  .option('--minutes <n>', 'stop after N minutes', (v) => Number(v))
+  .action(async (opts: { minutes?: number }) => {
+    const { config, secrets, logger, storage, clients } = boot();
+    const scanner = new Scanner({ config, clients, storage, clock: systemClock, logger });
+    let listener: PoolListener | null = null;
+    if (config.scanner.poolListener.enabled) {
+      if (!secrets.rpcUrl) logger.warn('SOLANA_RPC_URL not set; pool listener uses the public RPC WebSocket');
+      listener = new PoolListener({
+        config,
+        wsUrl: toWsUrl(secrets.rpcUrl?.reveal() ?? config.apis.rpc.baseUrl),
+        rpc: clients.rpc,
+        storage,
+        clock: systemClock,
+        logger,
+      });
+      listener.start();
+    }
+
+    let stopping = false;
+    const stop = () => {
+      stopping = true;
+    };
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+    const started = systemClock.now();
+    const endAt = opts.minutes ? started + opts.minutes * 60_000 : Number.POSITIVE_INFINITY;
+    let lastReport = started;
+    console.log(`Collecting (no trading). Ctrl-C to stop.${opts.minutes ? ` Stops after ${opts.minutes} min.` : ''}`);
+
+    while (!stopping && systemClock.now() < endAt) {
+      try {
+        const stats = await scanner.scan();
+        const size = mulFrac(storage.ledger.balance(), config.strategy.positionSizeFraction);
+        const { evaluations, budgetExhausted } = await evaluateCandidates(stats.candidates, stats.scanId, size, {
+          config,
+          clients,
+          storage,
+          clock: systemClock,
+          logger,
+          filters: ALL_FILTERS,
+        });
+        const passed = evaluations.filter((e) => e.result.verdict === 'passed');
+        const l = listener?.stats;
+        console.log(
+          `${new Date().toISOString()} priced ${stats.priced}, in band ${stats.inBand}, evaluated ${evaluations.length}, passed ${passed.length}` +
+            (passed.length ? ` [${passed.map((e) => e.candidate.symbol ?? e.candidate.mint.slice(0, 6)).join(', ')}]` : '') +
+            (l ? ` | pools: ${l.connected ? 'connected' : 'disconnected'}, ${l.resolved} resolved, ${l.mintsAdded} new mints` : '') +
+            (budgetExhausted ? ` | ${budgetExhausted}` : ''),
+        );
+      } catch (e) {
+        logger.error({ err: e }, 'collect_iteration_failed');
+      }
+      if (systemClock.now() - lastReport >= 15 * 60_000) {
+        lastReport = systemClock.now();
+        console.log(`\n${sourcesReport(storage, systemClock.now(), (systemClock.now() - started) / 3_600_000)}\n`);
+      }
+      const until = Math.min(endAt, systemClock.now() + config.loop.scanIntervalSec * 1000);
+      while (!stopping && systemClock.now() < until) await new Promise((r) => setTimeout(r, 500));
+    }
+
+    await listener?.stop();
+    console.log(`\n${sourcesReport(storage, systemClock.now(), (systemClock.now() - started) / 3_600_000)}`);
+    storage.close();
+  });
+
+program
+  .command('sources')
+  .description('discovery yield per source: discovered, candidates and passes per hour')
+  .option('--hours <n>', 'window in hours', (v) => Number(v), 24)
+  .action((opts: { hours: number }) => {
+    const { config } = load();
+    const storage = Storage.open({ path: config.storage.path, mode: config.mode, clock: systemClock });
+    try {
+      console.log(sourcesReport(storage, systemClock.now(), opts.hours));
     } finally {
       storage.close();
     }

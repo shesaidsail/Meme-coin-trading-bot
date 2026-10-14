@@ -92,6 +92,15 @@ export class Storage {
     this.db.close();
   }
 
+  getKv(key: string): string | null {
+    const r = this.db.prepare('SELECT value FROM kv WHERE key = ?').get(key) as { value: string } | undefined;
+    return r?.value ?? null;
+  }
+
+  setKv(key: string, value: string): void {
+    this.db.prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
   tx<T>(fn: () => T): T {
     return this.db.transaction(fn)();
   }

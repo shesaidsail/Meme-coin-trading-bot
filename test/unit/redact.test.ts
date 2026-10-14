@@ -3,8 +3,20 @@ import { Writable } from 'node:stream';
 import { redactString } from '../../src/util/redact.js';
 import { createLogger } from '../../src/util/logger.js';
 import { Secret } from '../../src/util/secret.js';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
+import { base58Encode, base58Decode } from '../../src/util/base58.js';
 
-const FAKE_KEY = '4'.repeat(10) + 'AbCdEfGhJkLmNpQrStUvWxYz'.repeat(3) + '5'.repeat(5); // 87 base58 chars
+/** A real Solana-format secret key: 32-byte seed || 32-byte public key, base58. */
+function solanaSecretKey(): string {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const seed = privateKey.export({ format: 'der', type: 'pkcs8' }).subarray(-32);
+  const pub = publicKey.export({ format: 'der', type: 'spki' }).subarray(-32);
+  return base58Encode(Uint8Array.from([...seed, ...pub]));
+}
+
+const FAKE_KEY = solanaSecretKey();
+/** A transaction signature: also 64 bytes, must NOT be redacted. */
+const SIGNATURE = base58Encode(Uint8Array.from(randomBytes(64)));
 
 describe('redaction', () => {
   it('scrubs api keys in URLs, bearer tokens and base58 secret keys', () => {
@@ -12,8 +24,21 @@ describe('redaction', () => {
       'https://mainnet.helius-rpc.com/?api-key=[REDACTED]',
     );
     expect(redactString('Authorization: Bearer xyz.abc')).toBe('Authorization: Bearer [REDACTED]');
-    expect(FAKE_KEY).toHaveLength(87);
-    expect(redactString(`key=${FAKE_KEY} end`)).not.toContain(FAKE_KEY);
+    expect(FAKE_KEY.length).toBeGreaterThanOrEqual(85);
+    expect(redactString(`key=${FAKE_KEY} end`)).toBe('key=[REDACTED] end');
+  });
+
+  it('keeps transaction signatures (same length as secret keys) intact', () => {
+    expect(SIGNATURE.length).toBeGreaterThanOrEqual(85);
+    expect(redactString(`sig ${SIGNATURE}`)).toBe(`sig ${SIGNATURE}`);
+    const real = '53HNQMxW858okz56oqK5vq5yEPxTAbNXVcvnzkDnEG5moWMBArntv6LsXTSjP1QH5kQfqYUfD7fetb5ny43y1oER';
+    expect(redactString(real)).toBe(real);
+  });
+
+  it('base58 round-trips, including leading zero bytes', () => {
+    const b = Uint8Array.from([0, 0, 1, 2, 255]);
+    expect(base58Decode(base58Encode(b))).toEqual(b);
+    expect(base58Decode('0OIl')).toBeNull();
   });
 
   it('leaves mint addresses (32-44 chars) intact', () => {

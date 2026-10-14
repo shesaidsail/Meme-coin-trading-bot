@@ -50,6 +50,21 @@ export async function rugcheckScoreDistribution(evals: Evaluation[]): Promise<st
   return `${table(['score', 'n', ''], rows)}\nn=${scores.length}, min=${sorted[0]}, median=${median}, max=${sorted.at(-1)}, unavailable=${unavailable}`;
 }
 
+/** Discovery yield per source: which feeds produce tokens that reach (and pass) the filters. */
+export function sourcesReport(storage: Storage, now: number, hours: number): string {
+  const since = now - hours * 3_600_000;
+  const earliest = storage.watchlist.earliestSighting(since);
+  if (earliest === null) return `No discoveries in the last ${hours}h.`;
+  const windowH = Math.max((now - earliest) / 3_600_000, 1 / 60);
+  const rate = (n: number) => (n / windowH).toFixed(1);
+  const rows = storage.watchlist.sourceYield(since).map((s) => [s.source, s.discovered, rate(s.discovered), s.firstToReport, s.evaluated, rate(s.evaluated), s.passed, rate(s.passed)]);
+  return [
+    `Discovery yield over the last ${windowH.toFixed(1)}h (candidates = reached the filter pipeline: priced, in band, old enough):`,
+    table(['source', 'discovered', '/h', 'first to report', 'candidates', 'candidates/h', 'passed', 'passed/h'], rows),
+    'A mint reported by several sources counts for each of them.',
+  ].join('\n');
+}
+
 export function apiUsageReport(storage: Storage, config: Config, now: number): string {
   const names = Object.keys(config.apis) as ApiName[];
   const rows = names.map((n) => {

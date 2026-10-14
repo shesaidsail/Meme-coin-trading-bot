@@ -74,6 +74,7 @@ export class Scanner {
 
     // 2. Price what is due.
     const due = storage.watchlist.listDue({
+      now,
       checkedBefore: now - sc.recheckCooldownMinutes * 60_000,
       seenAfter: now - sc.watchExpiryHours * 3_600_000,
       limit: sc.maxPricedPerScan,
